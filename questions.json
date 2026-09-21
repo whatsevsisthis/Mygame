@@ -1,0 +1,22 @@
+[
+  { "q": "Quelle planète est surnommée la planète rouge ?", "o": ["Terre", "Mars", "Jupiter", "Vénus"], "a": 1 },
+  { "q": "Quel est le plus grand mammifère du monde ?", "o": ["L'éléphant", "La baleine bleue", "La girafe", "Le grand requin blanc"], "a": 1 },
+  { "q": "Combien de côtés possède un hexagone ?", "o": ["5", "6", "7", "8"], "a": 1 },
+  { "q": "Quelle est la capitale de la France ?", "o": ["Berlin", "Madrid", "Rome", "Paris"], "a": 3 },
+  { "q": "Quel océan est le plus grand du monde ?", "o": ["L'océan Atlantique", "L'océan Indien", "L'océan Arctique", "L'océan Pacifique"], "a": 3 },
+  { "q": "Quel gaz les plantes absorbent-elles dans l'atmosphère ?", "o": ["L'oxygène", "L'azote", "Le dioxyde de carbone", "L'hydrogène"], "a": 2 },
+  { "q": "Qui a peint La Joconde ?", "o": ["Vincent van Gogh", "Pablo Picasso", "Léonard de Vinci", "Claude Monet"], "a": 2 },
+  { "q": "Quel est le matériau naturel le plus dur sur Terre ?", "o": ["L'or", "Le fer", "Le diamant", "Le platine"], "a": 2 },
+  { "q": "Combien de minutes y a-t-il dans une heure ?", "o": ["50", "60", "100", "3600"], "a": 1 },
+  { "q": "Quel animal est le symbole national de la France ?", "o": ["L'aigle", "Le coq", "Le lion", "Le loup"], "a": 1 },
+  { "q": "En quelle année l'homme a-t-il marché sur la Lune pour la première fois ?", "o": ["1965", "1969", "1972", "1975"], "a": 1 },
+  { "q": "Quel fleuve traverse la ville de Toulouse ?", "o": ["La Seine", "La Loire", "La Garonne", "Le Rhône"], "a": 2 },
+  { "q": "Quel est le plus long fleuve du monde ?", "o": ["Le Nil", "L'Amazone", "Le Mississippi", "Le Yangtsé"], "a": 1 },
+  { "q": "Combien de départements compte la France métropolitaine ?", "o": ["90", "95", "96", "101"], "a": 2 },
+  { "q": "Qui a écrit 'Les Misérables' ?", "o": ["Émile Zola", "Victor Hugo", "Gustave Flaubert", "Molière"], "a": 1 },
+  { "q": "Quelle est la vitesse de la lumière ?", "o": ["150 000 km/s", "300 000 km/s", "500 000 km/s", "1 000 000 km/s"], "a": 1 },
+  { "q": "Combien de joueurs composent une équipe de football sur le terrain ?", "o": ["9", "10", "11", "12"], "a": 2 },
+  { "q": "Quel est le pays le plus vaste du monde en surface ?", "o": ["Le Canada", "La Chine", "Les États-Unis", "La Russie"], "a": 3 },
+  { "q": "En quelle année a eu lieu la Révolution française ?", "o": ["1789", "1799", "1815", "1848"], "a": 0 },
+  { "q": "Quel est le plus haut sommet des Alpes ?", "o": ["Le Mont Cervin", "Le Mont Blanc", "Le pic du Midi", "L'Éverest"], "a": 1 }
+]
