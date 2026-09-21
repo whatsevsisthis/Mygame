@@ -35,7 +35,7 @@
   <!-- ECRAN CONFIGURATION -->
   <div id="setup-screen">
     <h1>🏆 Quiz en Famille</h1>
-    <div class="db-stats" id="db-count-display">Chargement...</div>
+    <div class="db-stats" id="db-count-display">Chargement de la base...</div>
     
     <label>Nombre de joueurs :</label>
     <select id="player-count-select" onchange="updatePlayerInputs()">
@@ -51,7 +51,7 @@
 
     <button onclick="startGame()">Lancer la partie</button>
     <button class="secondary" onclick="showHistory()">📜 Historique des parties</button>
-    <button class="secondary" onclick="toggleAdminPanel()">⚙️ Gérer les questions (BDD)</button>
+    <button class="secondary" onclick="toggleAdminPanel()">⚙️ Gérer / Importer Questions</button>
   </div>
 
   <!-- ECRAN HISTORIQUE -->
@@ -65,9 +65,10 @@
   <!-- ECRAN GESTION BDD -->
   <div id="admin-screen" class="hidden">
     <h2>Gestionnaire de questions</h2>
-    <p class="db-stats">Collez un tableau JSON pour ajouter des questions.</p>
+    <p class="db-stats">Téléchargez automatiquement ou collez du JSON.</p>
+    <button style="background: var(--success); margin-bottom: 15px;" onclick="downloadStarterPack()">📥 Télécharger 100+ Questions (En ligne)</button>
     <textarea id="import-json" placeholder='[{"q": "Question ?", "o": ["A", "B", "C", "D"], "a": 0}]'></textarea>
-    <button onclick="importQuestions()">Importer les questions JSON</button>
+    <button onclick="importQuestions()">Importer le JSON</button>
     <button class="secondary" onclick="resetDatabase()">Réinitialiser la base</button>
     <button class="secondary" onclick="toggleAdminPanel()">Retour au menu</button>
   </div>
@@ -91,7 +92,7 @@
 </div>
 
 <script>
-  const DB_NAME = 'QuizPartyDB_V2', DB_VERSION = 1;
+  const DB_NAME = 'QuizPartyDB_V3', DB_VERSION = 1;
   let db, players = [], currentTurn = 0, totalTurns = 0, maxTurns = 0, questionsList = [];
 
   function initDB() {
@@ -130,6 +131,32 @@
     });
   }
 
+  async function downloadStarterPack() {
+    alert("Téléchargement des questions en cours...");
+    try {
+      // Direct sample JSON dataset
+      const res = await fetch('https://raw.githubusercontent.com/LRP-ViorisE/OpenTriviaQA-FR/master/categories/general.json');
+      if(!res.ok) throw new Error();
+      const data = await res.json();
+      
+      const tx = db.transaction('questions', 'readwrite');
+      const store = tx.objectStore('questions');
+      let count = 0;
+      data.forEach(item => {
+        if(item.question && item.answers) {
+          store.add({ q: item.question, o: item.answers, a: item.correct_index || 0 });
+          count++;
+        }
+      });
+      tx.oncomplete = () => {
+        alert(`${count} questions ont été téléchargées et ajoutées à votre téléphone !`);
+        updateDBCount();
+      };
+    } catch(e) {
+      alert("Impossible de récupérer le pack en ligne. Utilisez le bouton d'importation manuelle JSON.");
+    }
+  }
+
   function importQuestions() {
     try {
       const parsed = JSON.parse(document.getElementById('import-json').value);
@@ -152,24 +179,17 @@
   function saveGameToHistory(winner, scores) {
     const tx = db.transaction('history', 'readwrite');
     const store = tx.objectStore('history');
-    const record = {
-      date: new Date().toLocaleString('fr-FR'),
-      winner: winner,
-      scores: scores
-    };
-    store.add(record);
+    store.add({ date: new Date().toLocaleString('fr-FR'), winner: winner, scores: scores });
   }
 
   function showHistory() {
     document.getElementById('setup-screen').classList.add('hidden');
     document.getElementById('history-screen').classList.remove('hidden');
-    
     const tx = db.transaction('history', 'readonly');
     tx.objectStore('history').getAll().onsuccess = (e) => {
       const history = e.target.result.reverse();
       const listContainer = document.getElementById('history-list');
       listContainer.innerHTML = history.length === 0 ? "<p class='db-stats'>Aucune partie enregistrée.</p>" : "";
-      
       history.forEach(item => {
         let scoresStr = item.scores.map(s => `${s.name}: ${s.score} pts`).join(' | ');
         listContainer.innerHTML += `
@@ -184,7 +204,7 @@
   }
 
   function clearHistory() {
-    if(confirm("Effacer tout l'historique des parties ?")) {
+    if(confirm("Effacer l'historique ?")) {
       const tx = db.transaction('history', 'readwrite');
       tx.objectStore('history').clear();
       showHistory();
@@ -276,12 +296,8 @@
     document.getElementById('results-screen').classList.remove('hidden');
     let sorted = [...players].sort((a,b) => b.score - a.score);
     let winnerText = sorted[0].score === sorted[1]?.score ? "Égalité parfaite !" : sorted[0].name;
-    
     document.getElementById('winner-announcement').innerText = sorted[0].score === sorted[1]?.score ? "Égalité parfaite !" : `🏆 Victoire de : ${sorted[0].name} !`;
-    
-    // Save to local history
     saveGameToHistory(winnerText, players);
-
     const finalSb = document.getElementById('final-scoreboard');
     finalSb.innerHTML = '';
     sorted.forEach(p => { finalSb.innerHTML += `<div class="player-card"><div>${p.name}</div><div class="score">${p.score} pts</div></div>`; });
