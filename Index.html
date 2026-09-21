@@ -4,10 +4,6 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Quiz en Famille</title>
-  <!-- Configuration PWA -->
-  <link rel="manifest" href="data:application/manifest+json;utf8,{%22name%22:%22Quiz%20en%20Famille%22,%22short_name%22:%22QuizFamille%22,%22start_url%22:%22.%22,%22display%22:%22standalone%22,%22background_color%22:%22%230f172a%22,%22theme_color%22:%22%230f172a%22}">
-  <meta name="apple-mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <style>
     :root { --bg: #0f172a; --card: #1e293b; --accent: #6366f1; --text: #f8fafc; --muted: #94a3b8; --success: #22c55e; --danger: #ef4444; }
     * { box-sizing: border-box; font-family: system-ui, -apple-system, sans-serif; margin: 0; padding: 0; }
@@ -30,6 +26,7 @@
     .option-btn.correct { background: var(--success); }
     .option-btn.wrong { background: var(--danger); }
     .db-stats { font-size: 14px; color: var(--muted); margin-bottom: 12px; text-align: center; }
+    .history-card { background: #0f172a; padding: 12px; border-radius: 8px; margin-bottom: 10px; border-left: 4px solid var(--accent); }
   </style>
 </head>
 <body>
@@ -38,7 +35,7 @@
   <!-- ECRAN CONFIGURATION -->
   <div id="setup-screen">
     <h1>🏆 Quiz en Famille</h1>
-    <div class="db-stats" id="db-count-display">Chargement de la base de données...</div>
+    <div class="db-stats" id="db-count-display">Chargement...</div>
     
     <label>Nombre de joueurs :</label>
     <select id="player-count-select" onchange="updatePlayerInputs()">
@@ -49,17 +46,26 @@
 
     <div class="player-inputs" id="player-inputs-container"></div>
 
-    <label>Nombre de tours par joueur :</label>
+    <label>Tours par joueur :</label>
     <input type="number" id="rounds-input" value="5" min="1" max="20">
 
     <button onclick="startGame()">Lancer la partie</button>
-    <button class="secondary" onclick="toggleAdminPanel()">Gérer les questions (BDD)</button>
+    <button class="secondary" onclick="showHistory()">📜 Historique des parties</button>
+    <button class="secondary" onclick="toggleAdminPanel()">⚙️ Gérer les questions (BDD)</button>
+  </div>
+
+  <!-- ECRAN HISTORIQUE -->
+  <div id="history-screen" class="hidden">
+    <h2>📜 Historique des Parties</h2>
+    <div id="history-list" style="max-height: 300px; overflow-y: auto; margin-bottom: 16px;"></div>
+    <button class="secondary" onclick="clearHistory()">Effacer l'historique</button>
+    <button class="secondary" onclick="closeHistory()">Retour au menu</button>
   </div>
 
   <!-- ECRAN GESTION BDD -->
   <div id="admin-screen" class="hidden">
     <h2>Gestionnaire de questions</h2>
-    <p class="db-stats">Collez du texte au format JSON pour ajouter des questions dans le téléphone.</p>
+    <p class="db-stats">Collez un tableau JSON pour ajouter des questions.</p>
     <textarea id="import-json" placeholder='[{"q": "Question ?", "o": ["A", "B", "C", "D"], "a": 0}]'></textarea>
     <button onclick="importQuestions()">Importer les questions JSON</button>
     <button class="secondary" onclick="resetDatabase()">Réinitialiser la base</button>
@@ -85,7 +91,7 @@
 </div>
 
 <script>
-  const DB_NAME = 'QuizPartyDB_FR', DB_VERSION = 1;
+  const DB_NAME = 'QuizPartyDB_V2', DB_VERSION = 1;
   let db, players = [], currentTurn = 0, totalTurns = 0, maxTurns = 0, questionsList = [];
 
   function initDB() {
@@ -94,22 +100,19 @@
       request.onsuccess = (e) => { db = e.target.result; updateDBCount(); resolve(db); };
       request.onupgradeneeded = (e) => {
         db = e.target.result;
-        const store = db.createObjectStore('questions', { keyPath: 'id', autoIncrement: true });
+        db.createObjectStore('questions', { keyPath: 'id', autoIncrement: true });
+        db.createObjectStore('history', { keyPath: 'id', autoIncrement: true });
         
-        // Questions par défaut en Français
+        const tx = e.target.transaction;
+        const qStore = tx.objectStore('questions');
         const defaults = [
           { q: "Quelle planète est surnommée la planète rouge ?", o: ["Terre", "Mars", "Jupiter", "Vénus"], a: 1 },
           { q: "Quel est le plus grand mammifère du monde ?", o: ["L'éléphant", "La baleine bleue", "La girafe", "Le grand requin blanc"], a: 1 },
           { q: "Combien de côtés possède un hexagone ?", o: ["5", "6", "7", "8"], a: 1 },
           { q: "Quelle est la capitale de la France ?", o: ["Berlin", "Madrid", "Rome", "Paris"], a: 3 },
-          { q: "Quel océan est le plus grand du monde ?", o: ["L'océan Atlantique", "L'océan Indien", "L'océan Arctique", "L'océan Pacifique"], a: 3 },
-          { q: "Quel gaz les plantes absorbent-elles dans l'atmosphère ?", o: ["L'oxygène", "L'azote", "Le dioxyde de carbone", "L'hydrogène"], a: 2 },
-          { q: "Qui a peint La Joconde ?", o: ["Vincent van Gogh", "Pablo Picasso", "Léonard de Vinci", "Claude Monet"], a: 2 },
-          { q: "Quel est le matériau naturel le plus dur sur Terre ?", o: ["L'or", "Le fer", "Le diamant", "Le platine"], a: 2 },
-          { q: "Combien de minutes y a-t-il dans une heure ?", o: ["50", "60", "100", "3600"], a: 1 },
-          { q: "Quel animal est le symbole national de la France ?", o: ["L'aigle", "Le coq", "Le lion", "Le loup"], a: 1 }
+          { q: "Quel océan est le plus grand du monde ?", o: ["L'océan Atlantique", "L'océan Indien", "L'océan Arctique", "L'océan Pacifique"], a: 3 }
         ];
-        defaults.forEach(q => store.add(q));
+        defaults.forEach(q => qStore.add(q));
       };
     });
   }
@@ -135,15 +138,62 @@
       const store = tx.objectStore('questions');
       parsed.forEach(item => store.add(item));
       tx.oncomplete = () => { alert("Questions importées avec succès !"); document.getElementById('import-json').value = ''; updateDBCount(); };
-    } catch(e) { alert("Format JSON invalide. Exemple requis: [{ 'q':'...', 'o':['...'], 'a':0 }]"); }
+    } catch(e) { alert("Format JSON invalide."); }
   }
 
   function resetDatabase() {
-    if(confirm("Réinitialiser la base de données avec les questions par défaut ?")) {
+    if(confirm("Réinitialiser la base de questions ?")) {
       const tx = db.transaction('questions', 'readwrite');
       tx.objectStore('questions').clear();
       location.reload();
     }
+  }
+
+  function saveGameToHistory(winner, scores) {
+    const tx = db.transaction('history', 'readwrite');
+    const store = tx.objectStore('history');
+    const record = {
+      date: new Date().toLocaleString('fr-FR'),
+      winner: winner,
+      scores: scores
+    };
+    store.add(record);
+  }
+
+  function showHistory() {
+    document.getElementById('setup-screen').classList.add('hidden');
+    document.getElementById('history-screen').classList.remove('hidden');
+    
+    const tx = db.transaction('history', 'readonly');
+    tx.objectStore('history').getAll().onsuccess = (e) => {
+      const history = e.target.result.reverse();
+      const listContainer = document.getElementById('history-list');
+      listContainer.innerHTML = history.length === 0 ? "<p class='db-stats'>Aucune partie enregistrée.</p>" : "";
+      
+      history.forEach(item => {
+        let scoresStr = item.scores.map(s => `${s.name}: ${s.score} pts`).join(' | ');
+        listContainer.innerHTML += `
+          <div class="history-card">
+            <div><strong>${item.date}</strong></div>
+            <div style="color:#a5b4fc;">🏆 ${item.winner}</div>
+            <div style="font-size:14px; color:var(--muted);">${scoresStr}</div>
+          </div>
+        `;
+      });
+    };
+  }
+
+  function clearHistory() {
+    if(confirm("Effacer tout l'historique des parties ?")) {
+      const tx = db.transaction('history', 'readwrite');
+      tx.objectStore('history').clear();
+      showHistory();
+    }
+  }
+
+  function closeHistory() {
+    document.getElementById('history-screen').classList.add('hidden');
+    document.getElementById('setup-screen').classList.remove('hidden');
   }
 
   function updatePlayerInputs() {
@@ -168,7 +218,7 @@
       players.push({ name: document.getElementById(`p-name-${i}`).value || `Joueur ${i}`, score: 0 });
     }
     const all = await getQuestionsFromDB();
-    if(all.length < count * rounds) { alert(`Pas assez de questions dans la base ! Il en faut au moins ${count * rounds}.`); return; }
+    if(all.length < count * rounds) { alert(`Pas assez de questions ! Il en faut au moins ${count * rounds}.`); return; }
     questionsList = all.sort(() => Math.random() - 0.5);
     currentTurn = 0; totalTurns = 0; maxTurns = count * rounds;
     document.getElementById('setup-screen').classList.add('hidden');
@@ -225,7 +275,13 @@
     document.getElementById('game-screen').classList.add('hidden');
     document.getElementById('results-screen').classList.remove('hidden');
     let sorted = [...players].sort((a,b) => b.score - a.score);
+    let winnerText = sorted[0].score === sorted[1]?.score ? "Égalité parfaite !" : sorted[0].name;
+    
     document.getElementById('winner-announcement').innerText = sorted[0].score === sorted[1]?.score ? "Égalité parfaite !" : `🏆 Victoire de : ${sorted[0].name} !`;
+    
+    // Save to local history
+    saveGameToHistory(winnerText, players);
+
     const finalSb = document.getElementById('final-scoreboard');
     finalSb.innerHTML = '';
     sorted.forEach(p => { finalSb.innerHTML += `<div class="player-card"><div>${p.name}</div><div class="score">${p.score} pts</div></div>`; });
