@@ -14,6 +14,8 @@
     input, select, button, textarea { width: 100%; padding: 12px; margin-bottom: 12px; border-radius: 8px; border: 1px solid #334155; background: #0f172a; color: white; font-size: 16px; }
     button { background: var(--accent); font-weight: bold; cursor: pointer; border: none; }
     button.secondary { background: #475569; }
+    button.danger-action { background: var(--danger); font-weight: bold; }
+    button.danger-btn { background: var(--danger); font-size: 12px; padding: 6px 12px; width: auto; margin: 0; }
     .player-inputs { display: grid; gap: 8px; margin-bottom: 16px; }
     .scoreboard { display: grid; grid-template-columns: repeat(auto-fit, minmax(100px, 1fr)); gap: 10px; margin-bottom: 20px; }
     .player-card { background: #0f172a; padding: 10px; border-radius: 8px; text-align: center; border: 2px solid transparent; }
@@ -25,8 +27,9 @@
     .option-btn { background: #334155; text-align: left; }
     .option-btn.correct { background: var(--success); }
     .option-btn.wrong { background: var(--danger); }
-    .db-stats { font-size: 14px; color: var(--muted); margin-bottom: 12px; text-align: center; }
-    .history-card { background: #0f172a; padding: 12px; border-radius: 8px; margin-bottom: 10px; border-left: 4px solid var(--accent); }
+    .db-stats { font-size: 15px; color: #a5b4fc; margin-bottom: 12px; text-align: center; font-weight: bold; }
+    .history-card, .q-card { background: #0f172a; padding: 12px; border-radius: 8px; margin-bottom: 10px; border-left: 4px solid var(--accent); }
+    .q-card { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
   </style>
 </head>
 <body>
@@ -34,6 +37,326 @@
 <div class="container">
   <!-- ECRAN CONFIGURATION -->
   <div id="setup-screen">
+    <h1>🏆 Quiz en Famille</h1>
+    <div class="db-stats" id="db-count-display">Chargement...</div>
+    
+    <label>Nombre de joueurs :</label>
+    <select id="player-count-select" onchange="updatePlayerInputs()">
+      <option value="2">2 Joueurs</option>
+      <option value="3">3 Joueurs</option>
+      <option value="4" selected>4 Joueurs</option>
+    </select>
+
+    <div class="player-inputs" id="player-inputs-container"></div>
+
+    <label>Tours par joueur :</label>
+    <input type="number" id="rounds-input" value="5" min="1" max="20">
+
+    <button onclick="startGame()">Lancer la partie</button>
+    <button class="secondary" onclick="showHistory()">📜 Historique des parties</button>
+    <button class="secondary" onclick="toggleAdminPanel()">⚙️ Gérer la base de questions</button>
+  </div>
+
+  <!-- ECRAN HISTORIQUE -->
+  <div id="history-screen" class="hidden">
+    <h2>📜 Historique des Parties</h2>
+    <div id="history-list" style="max-height: 300px; overflow-y: auto; margin-bottom: 16px;"></div>
+    <button class="secondary" onclick="clearHistory()">Effacer l'historique</button>
+    <button class="secondary" onclick="closeHistory()">Retour au menu</button>
+  </div>
+
+  <!-- ECRAN LISTE DES QUESTIONS -->
+  <div id="questions-list-screen" class="hidden">
+    <h2>📋 Questions en base</h2>
+    <div class="db-stats" id="q-list-count"></div>
+    <div id="questions-container" style="max-height: 350px; overflow-y: auto; margin-bottom: 16px;"></div>
+    <button class="secondary" onclick="closeQuestionsList()">Retour à la gestion</button>
+  </div>
+
+  <!-- ECRAN GESTION BDD -->
+  <div id="admin-screen" class="hidden">
+    <h2>Gestionnaire de questions</h2>
+    <div class="db-stats" id="admin-db-count"></div>
+    
+    <button style="background: #3b82f6; margin-bottom: 12px;" onclick="showQuestionsList()">📋 Voir les questions stockées</button>
+
+    <label>Importer des questions au format JSON :</label>
+    <textarea id="import-json" placeholder='[{"q": "Question ?", "o": ["A", "B", "C", "D"], "a": 0}]'></textarea>
+    <button onclick="importQuestions()">Importer le texte JSON</button>
+    <button class="secondary" onclick="resetDatabase()">Réinitialiser la base par défaut</button>
+    <button class="danger-action" onclick="clearQuestionDatabase()">⚠️ Vider la base de questions</button>
+    <button class="secondary" onclick="toggleAdminPanel()">Retour au menu</button>
+  </div>
+
+  <!-- ECRAN DE JEU -->
+  <div id="game-screen" class="hidden">
+    <div class="scoreboard" id="scoreboard"></div>
+    <div class="turn-indicator" id="turn-indicator">Tour du joueur</div>
+    <div class="question-box" id="question-text">Question...</div>
+    <div class="options" id="options-container"></div>
+    <button id="next-btn" class="hidden" style="margin-top: 15px;" onclick="nextTurn()">Question suivante</button>
+  </div>
+
+  <!-- ECRAN DE FIN -->
+  <div id="results-screen" class="hidden">
+    <h1>Fin de la partie !</h1>
+    <div id="winner-announcement" style="text-align: center; font-size: 22px; margin-bottom: 20px;"></div>
+    <div class="scoreboard" id="final-scoreboard"></div>
+    <button onclick="location.reload()">Rejouer une partie</button>
+  </div>
+</div>
+
+<script>
+  const DB_NAME = 'QuizPartyDB_V4', DB_VERSION = 1;
+  let db, players = [], currentTurn = 0, totalTurns = 0, maxTurns = 0, questionsList = [];
+
+  function initDB() {
+    return new Promise((resolve) => {
+      const request = indexedDB.open(DB_NAME, DB_VERSION);
+      request.onsuccess = (e) => { db = e.target.result; updateDBCount(); resolve(db); };
+      request.onupgradeneeded = (e) => {
+        db = e.target.result;
+        db.createObjectStore('questions', { keyPath: 'id', autoIncrement: true });
+        db.createObjectStore('history', { keyPath: 'id', autoIncrement: true });
+        
+        const tx = e.target.transaction;
+        const qStore = tx.objectStore('questions');
+        const defaults = [
+          { q: "Quelle planète est surnommée la planète rouge ?", o: ["Terre", "Mars", "Jupiter", "Vénus"], a: 1 },
+          { q: "Quel est le plus grand mammifère du monde ?", o: ["L'éléphant", "La baleine bleue", "La girafe", "Le grand requin blanc"], a: 1 },
+          { q: "Combien de côtés possède un hexagone ?", o: ["5", "6", "7", "8"], a: 1 },
+          { q: "Quelle est la capitale de la France ?", o: ["Berlin", "Madrid", "Rome", "Paris"], a: 3 },
+          { q: "Quel océan est le plus grand du monde ?", o: ["L'océan Atlantique", "L'océan Indien", "L'océan Arctique", "L'océan Pacifique"], a: 3 },
+          { q: "Quel gaz les plantes absorbent-elles dans l'atmosphère ?", o: ["L'oxygène", "L'azote", "Le dioxyde de carbone", "L'hydrogène"], a: 2 },
+          { q: "Qui a peint La Joconde ?", o: ["Vincent van Gogh", "Pablo Picasso", "Léonard de Vinci", "Claude Monet"], a: 2 },
+          { q: "Quel est le matériau naturel le plus dur sur Terre ?", o: ["L'or", "Le fer", "Le diamant", "Le platine"], a: 2 },
+          { q: "Combien de minutes y a-t-il dans une heure ?", o: ["50", "60", "100", "3600"], a: 1 },
+          { q: "Quel animal est le symbole national de la France ?", o: ["L'aigle", "Le coq", "Le lion", "Le loup"], a: 1 }
+        ];
+        defaults.forEach(q => qStore.add(q));
+      };
+    });
+  }
+
+  function getQuestionsFromDB() {
+    return new Promise((resolve) => {
+      const tx = db.transaction('questions', 'readonly');
+      tx.objectStore('questions').getAll().onsuccess = (e) => resolve(e.target.result);
+    });
+  }
+
+  function updateDBCount() {
+    getQuestionsFromDB().then(qs => {
+      const txt = `📊 Total dans le téléphone : ${qs.length} question(s)`;
+      document.getElementById('db-count-display').innerText = txt;
+      document.getElementById('admin-db-count').innerText = txt;
+    });
+  }
+
+  function showQuestionsList() {
+    document.getElementById('admin-screen').classList.add('hidden');
+    document.getElementById('questions-list-screen').classList.remove('hidden');
+
+    getQuestionsFromDB().then(qs => {
+      document.getElementById('q-list-count').innerText = `Total : ${qs.length} question(s)`;
+      const container = document.getElementById('questions-container');
+      container.innerHTML = qs.length === 0 ? "<p class='db-stats'>Aucune question enregistrée.</p>" : "";
+
+      qs.forEach((q, index) => {
+        container.innerHTML += `
+          <div class="q-card">
+            <div style="font-size: 14px;">
+              <strong>${index + 1}. ${q.q}</strong><br>
+              <span style="color: var(--muted); font-size: 12px;">Réponse : ${q.o[q.a]}</span>
+            </div>
+            <button class="danger-btn" onclick="deleteQuestion(${q.id})">🗑️</button>
+          </div>
+        `;
+      });
+    });
+  }
+
+  function deleteQuestion(id) {
+    if(confirm("Supprimer cette question ?")) {
+      const tx = db.transaction('questions', 'readwrite');
+      tx.objectStore('questions').delete(id);
+      tx.oncomplete = () => {
+        showQuestionsList();
+        updateDBCount();
+      };
+    }
+  }
+
+  function closeQuestionsList() {
+    document.getElementById('questions-list-screen').classList.add('hidden');
+    document.getElementById('admin-screen').classList.remove('hidden');
+  }
+
+  function importQuestions() {
+    try {
+      const parsed = JSON.parse(document.getElementById('import-json').value);
+      if(!Array.isArray(parsed)) throw new Error();
+      const tx = db.transaction('questions', 'readwrite');
+      const store = tx.objectStore('questions');
+      parsed.forEach(item => store.add(item));
+      tx.oncomplete = () => { 
+        alert("Questions ajoutées avec succès !"); 
+        document.getElementById('import-json').value = ''; 
+        updateDBCount(); 
+      };
+    } catch(e) { alert("Format JSON invalide. Exemple : [{'q':'Question ?', 'o':['A','B','C','D'], 'a':0}]"); }
+  }
+
+  function resetDatabase() {
+    if(confirm("Réinitialiser la base aux questions par défaut ?")) {
+      const tx = db.transaction('questions', 'readwrite');
+      tx.objectStore('questions').clear();
+      location.reload();
+    }
+  }
+
+  function clearQuestionDatabase() {
+    if(confirm("Êtes-vous sûr de vouloir tout supprimer ? Toutes les questions enregistrées seront effacées.")) {
+      const tx = db.transaction('questions', 'readwrite');
+      tx.objectStore('questions').clear();
+      tx.oncomplete = () => {
+        alert("La base de données de questions a été entièrement vidée.");
+        updateDBCount();
+      };
+    }
+  }
+
+  function saveGameToHistory(winner, scores) {
+    const tx = db.transaction('history', 'readwrite');
+    const store = tx.objectStore('history');
+    store.add({ date: new Date().toLocaleString('fr-FR'), winner: winner, scores: scores });
+  }
+
+  function showHistory() {
+    document.getElementById('setup-screen').classList.add('hidden');
+    document.getElementById('history-screen').classList.remove('hidden');
+    const tx = db.transaction('history', 'readonly');
+    tx.objectStore('history').getAll().onsuccess = (e) => {
+      const history = e.target.result.reverse();
+      const listContainer = document.getElementById('history-list');
+      listContainer.innerHTML = history.length === 0 ? "<p class='db-stats'>Aucune partie enregistrée.</p>" : "";
+      history.forEach(item => {
+        let scoresStr = item.scores.map(s => `${s.name}: ${s.score} pts`).join(' | ');
+        listContainer.innerHTML += `
+          <div class="history-card">
+            <div><strong>${item.date}</strong></div>
+            <div style="color:#a5b4fc;">🏆 ${item.winner}</div>
+            <div style="font-size:14px; color:var(--muted);">${scoresStr}</div>
+          </div>
+        `;
+      });
+    };
+  }
+
+  function clearHistory() {
+    if(confirm("Effacer tout l'historique ?")) {
+      const tx = db.transaction('history', 'readwrite');
+      tx.objectStore('history').clear();
+      showHistory();
+    }
+  }
+
+  function closeHistory() {
+    document.getElementById('history-screen').classList.add('hidden');
+    document.getElementById('setup-screen').classList.remove('hidden');
+  }
+
+  function updatePlayerInputs() {
+    const count = parseInt(document.getElementById('player-count-select').value);
+    const container = document.getElementById('player-inputs-container');
+    container.innerHTML = '';
+    for(let i = 1; i <= count; i++) {
+      container.innerHTML += `<input type="text" id="p-name-${i}" value="Joueur ${i}">`;
+    }
+  }
+
+  function toggleAdminPanel() {
+    document.getElementById('setup-screen').classList.toggle('hidden');
+    document.getElementById('admin-screen').classList.toggle('hidden');
+  }
+
+  async function startGame() {
+    const count = parseInt(document.getElementById('player-count-select').value);
+    const rounds = parseInt(document.getElementById('rounds-input').value);
+    players = [];
+    for(let i = 1; i <= count; i++) {
+      players.push({ name: document.getElementById(`p-name-${i}`).value || `Joueur ${i}`, score: 0 });
+    }
+    const all = await getQuestionsFromDB();
+    if(all.length < count * rounds) { alert(`Pas assez de questions ! Il en faut au moins ${count * rounds}. (Actuellement: ${all.length})`); return; }
+    questionsList = all.sort(() => Math.random() - 0.5);
+    currentTurn = 0; totalTurns = 0; maxTurns = count * rounds;
+    document.getElementById('setup-screen').classList.add('hidden');
+    document.getElementById('game-screen').classList.remove('hidden');
+    renderBoard(); loadQuestion();
+  }
+
+  function renderBoard() {
+    const sb = document.getElementById('scoreboard');
+    sb.innerHTML = '';
+    players.forEach((p, idx) => {
+      sb.innerHTML += `<div class="player-card ${idx === currentTurn ? 'active' : ''}"><div>${p.name}</div><div class="score" id="p-score-${idx}">${p.score}</div></div>`;
+    });
+  }
+
+  function loadQuestion() {
+    document.getElementById('turn-indicator').innerText = `C'est au tour de : ${players[currentTurn].name}`;
+    const qData = questionsList[totalTurns];
+    document.getElementById('question-text').innerText = qData.q;
+    const optionsContainer = document.getElementById('options-container');
+    optionsContainer.innerHTML = '';
+    qData.o.forEach((opt, idx) => {
+      const btn = document.createElement('button');
+      btn.className = 'option-btn';
+      btn.innerText = opt;
+      btn.onclick = () => selectAnswer(idx, qData.a, btn);
+      optionsContainer.appendChild(btn);
+    });
+    document.getElementById('next-btn').classList.add('hidden');
+  }
+
+  function selectAnswer(selectedIndex, correctIndex, btnElement) {
+    const buttons = document.querySelectorAll('.option-btn');
+    buttons.forEach(b => b.disabled = true);
+    if (selectedIndex === correctIndex) {
+      btnElement.classList.add('correct');
+      players[currentTurn].score += 10;
+      document.getElementById(`p-score-${currentTurn}`).innerText = players[currentTurn].score;
+    } else {
+      btnElement.classList.add('wrong');
+      buttons[correctIndex].classList.add('correct');
+    }
+    document.getElementById('next-btn').classList.remove('hidden');
+  }
+
+  function nextTurn() {
+    totalTurns++;
+    if(totalTurns >= maxTurns) { endGame(); return; }
+    currentTurn = (currentTurn + 1) % players.length;
+    renderBoard(); loadQuestion();
+  }
+
+  function endGame() {
+    document.getElementById('game-screen').classList.add('hidden');
+    document.getElementById('results-screen').classList.remove('hidden');
+    let sorted = [...players].sort((a,b) => b.score - a.score);
+    let winnerText = sorted[0].score === sorted[1]?.score ? "Égalité parfaite !" : sorted[0].name;
+    document.getElementById('winner-announcement').innerText = sorted[0].score === sorted[1]?.score ? "Égalité parfaite !" : `🏆 Victoire de : ${sorted[0].name} !`;
+    saveGameToHistory(winnerText, players);
+    const finalSb = document.getElementById('final-scoreboard');
+    finalSb.innerHTML = '';
+    sorted.forEach(p => { finalSb.innerHTML += `<div class="player-card"><div>${p.name}</div><div class="score">${p.score} pts</div></div>`; });
+  }
+
+  window.onload = () => { initDB(); updatePlayerInputs(); };
+</script>
+</body>
+</html>
     <h1>🏆 Quiz en Famille</h1>
     <div class="db-stats" id="db-count-display">Chargement de la base...</div>
     
